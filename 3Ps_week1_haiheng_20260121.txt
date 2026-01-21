@@ -1,0 +1,4 @@
+o Progress: I researched the best way to accomplish the project gaol by using windows power automate
+o Problems: Power automate can  automate the process, connect price files to cloud and PowerBI, but I still have to figure out how to do the analysis part.
+o Plans: I intend to find out how to do the analysis part of the project.
+o Hours: 5 Hours
