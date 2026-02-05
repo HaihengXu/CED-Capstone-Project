@@ -1,4 +1,0 @@
-o Progress: Created the whole framework of the workflow, from data gathering to storage to analyze
-o Problems: The format of the price files are not consistent, I have the design a format so all the data can be recorded correctly in PowerBI
-o Plans: I will have to go over previous course that talked about PowerBI and some tutorial videos about PowerBI.
-o Hours: 10 Hours

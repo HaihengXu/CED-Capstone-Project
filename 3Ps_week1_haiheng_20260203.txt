@@ -1,0 +1,17 @@
+Week3
+o Progress: Tested the flow and it is running for the most part, connected it PowerBI and did some data manipulation and visuals
+o Problems: The data merging is not working great, still working on it.
+o Plans: I am working on the data merging part. Also working on how to only aim for pricing files.
+o Hours: 20 Hours
+
+Week2
+o Progress: Created the whole framework of the workflow, from data gathering to storage to analyze
+o Problems: The format of the price files are not consistent, I have the design a format so all the data can be recorded correctly in PowerBI
+o Plans: I will have to go over previous course that talked about PowerBI and some tutorial videos about PowerBI.
+o Hours: 10 Hours
+
+Week1
+o Progress: I researched the best way to accomplish the project gaol by using windows power automate
+o Problems: Power automate can  automate the process, connect price files to cloud and PowerBI, but I still have to figure out how to do the analysis part.
+o Plans: I intend to find out how to do the analysis part of the project.
+o Hours: 5 Hours
