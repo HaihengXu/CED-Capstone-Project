@@ -1,3 +1,9 @@
+Week4
+o Progress: Communicated with client about other aspects of the project, potentially predictive analysis. Improved some visuals and add search to the data so it suits their needs more.
+o Problems: Working on the idea of predictive analysis.
+o Plans: Check out classmates videos to see what they did with their project.
+o Hours: 10 Hours
+
 Week3
 o Progress: Tested the flow and it is running for the most part, connected it PowerBI and did some data manipulation and visuals
 o Problems: The data merging is not working great, still working on it.
