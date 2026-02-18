@@ -1,3 +1,9 @@
+Week5
+o Progress: Completed the flow. Now the flow is running good. Debugging the flow. 
+o Problems: Try to figure out how each process can go wrong and improve them.
+o Plans: Use it as many as I can.
+o Hours: 10 Hours
+
 Week4
 o Progress: Communicated with client about other aspects of the project, potentially predictive analysis. Improved some visuals and add search to the data so it suits their needs more.
 o Problems: Working on the idea of predictive analysis.
