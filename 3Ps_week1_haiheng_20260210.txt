@@ -1,3 +1,15 @@
+Week7
+o Progress: Trying more visuals, making it look professional. Based on CED's need, coming up with more functions. Exploring more ways to analyze data.
+o Problems: Trade off between making what I have better or find a better solution.
+o Plans: Look for examples online
+o Hours: 25 Hours
+
+Week6
+o Progress: Uploaded all the existing files to the folder and trying to improve the visuals
+o Problems: The folder exceeded PowerBI limit.
+o Plans: Group data in transform before processing them.
+o Hours: 20 Hours
+
 Week5
 o Progress: Completed the flow. Now the flow is running good. Debugging the flow. 
 o Problems: Try to figure out how each process can go wrong and improve them.
