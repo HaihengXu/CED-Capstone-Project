@@ -1,3 +1,9 @@
+Week8
+o Progress: Switching to Python, working on the functions file.
+o Problems: It is hard to abandon what I have and switch completely to Python, time is limited.
+o Plans: From what I did in the analysis part and combine them with file merging functions.
+o Hours: 25 Hours
+
 Week7
 o Progress: Trying more visuals, making it look professional. Based on CED's need, coming up with more functions. Exploring more ways to analyze data.
 o Problems: Trade off between making what I have better or find a better solution.
