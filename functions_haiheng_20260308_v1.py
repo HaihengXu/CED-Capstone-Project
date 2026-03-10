@@ -38,7 +38,7 @@ def load_pricing_files(folder_path):
 
     # Use a pattern that catches both extensions
     # .glob("*") or filtering within the loop is safest
-    for file in folder.iterdir():
+    for file in folder.glob("*"):
         # Skip directories and temporary Excel lock files
         if file.is_dir() or file.name.startswith("~$"):
             continue
@@ -92,23 +92,6 @@ def load_pricing_files(folder_path):
     
     return combined_df
 
-# This function standardizes column names to handle variations in input files
-def get_standard_column(col_name):
-    """
-    Maps various incoming column names to standard internal keys.
-    """
-    name = str(col_name).lower().strip()
-    # Logic for flexible naming
-    if any(x in name for x in ["net price", "spa price", "net_price"]):
-        return "Net Price"
-    if any(x in name for x in ["dist cost", "dist_cost", "unit cost"]):
-        return "Dist Cost"
-    if "uom" in name:
-        return "UOM"
-    if "disc" in name:
-        return "Disc"
-    return None
-
 # Data Cleaning
 def clean_pricing_data(df):
     """
@@ -161,8 +144,7 @@ def clean_pricing_data(df):
         raise ValueError(f"Error converting Net Price to numeric: {e}")
 
     # Remove rows with missing UPC or invalid prices
-    df = df.dropna(subset=["upc", "net_price"])
-    df = df[df["net_price"] > 0]
+    df = df[df["upc"].notna() & (df["net_price"] > 0)]
     
     # Validate we still have data after cleaning
     if df.empty:
@@ -334,7 +316,7 @@ def get_standard_column(column_name):
     
     # Check each standard name
     for standard_name, variations in standardization_map.items():
-        if col_lower in variations:
+        if any(variation in col_lower for variation in variations):
             # Return with proper casing
             if standard_name == 'mfrcode':
                 return 'MfrCode'
@@ -397,7 +379,7 @@ def load_and_pivot_data(folder_path):
     # 1. Identify first 4 fixed columns (product identifiers)
     fixed_cols = ["MfrCode", "Catalog #", "UPC", "Description"]
     
-    for file in folder.iterdir():
+    for file in folder.glob("*"):
         # Skip non-data files
         if file.suffix.lower() not in ['.xlsx', '.csv'] or file.name.startswith("~$"):
             continue
@@ -459,7 +441,7 @@ def load_and_pivot_data(folder_path):
     
             # 5. Set Index to the fixed columns (product identifiers)
             # Use the ORIGINAL column names that map to our fixed columns
-            df = df.set_index(available_fixed)
+            df = df.set_index([c for c in fixed_cols if c in df.columns])
     
             # 6. Add the Location label as a top-level column index (MultiIndex)
             df.columns = pd.MultiIndex.from_product([[location_label], df.columns])
