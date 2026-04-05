@@ -3,12 +3,14 @@ from pathlib import Path
 import warnings
 
 # This function handles the "messy" reality of folder management
-def load_pricing_files(folder_path):
+def load_pricing_files(folder_path, recursive=False, include_parent_in_location=False):
     """
     Load and combine pricing files from a folder.
     
     Args:
         folder_path: Path to folder containing Excel/CSV files
+        recursive: If True, also search all subfolders
+        include_parent_in_location: If True, prefix location with relative parent folder
         
     Returns:
         Combined DataFrame with all pricing data
@@ -36,11 +38,18 @@ def load_pricing_files(folder_path):
     dfs = []
     errors = []
 
+    files_iter = folder.rglob("*") if recursive else folder.glob("*")
+
     # Use a pattern that catches both extensions
     # .glob("*") or filtering within the loop is safest
-    for file in folder.glob("*"):
+    for file in files_iter:
         # Skip directories and temporary Excel lock files
         if file.is_dir() or file.name.startswith("~$"):
+            continue
+
+        # Skip generated output files when recursive mode is enabled
+        rel_parts = file.relative_to(folder).parts
+        if any(part.lower() == "output" for part in rel_parts[:-1]):
             continue
             
         # Check the file extension
@@ -68,6 +77,10 @@ def load_pricing_files(folder_path):
 
             # Extract location code from filename
             location = file.stem.split(" - ")[-1] if " - " in file.stem else file.stem
+            if include_parent_in_location:
+                rel_parent = file.parent.relative_to(folder)
+                if str(rel_parent) != ".":
+                    location = f"{rel_parent}_{location}"
             df["location"] = location
 
             dfs.append(df)
@@ -338,7 +351,7 @@ def get_standard_column(column_name):
     return None
 
 # Wide Format Data Loader
-def load_and_pivot_data(folder_path):
+def load_and_pivot_data(folder_path, recursive=False, include_parent_in_location=False):
     """
     Load pricing files and create a wide-format comparison with MultiIndex columns.
     
@@ -349,6 +362,8 @@ def load_and_pivot_data(folder_path):
     
     Args:
         folder_path: Path to folder containing Excel/CSV files
+        recursive: If True, also search all subfolders
+        include_parent_in_location: If True, prefix location with relative parent folder
         
     Returns:
         DataFrame with MultiIndex columns: (Location, PricingField)
@@ -379,20 +394,27 @@ def load_and_pivot_data(folder_path):
     # 1. Identify first 4 fixed columns (product identifiers)
     fixed_cols = ["MfrCode", "Catalog #", "UPC", "Description"]
     
-    for file in folder.glob("*"):
+    files_iter = folder.rglob("*") if recursive else folder.glob("*")
+
+    for file in files_iter:
         # Skip non-data files
         if file.suffix.lower() not in ['.xlsx', '.csv'] or file.name.startswith("~$"):
+            continue
+
+        # Skip generated output files when recursive mode is enabled
+        rel_parts = file.relative_to(folder).parts
+        if any(part.lower() == "output" for part in rel_parts[:-1]):
             continue
         
         try:
             # Load file based on extension
             if file.suffix.lower() == '.xlsx':
-                df = pd.read_excel(file)
+                df = pd.read_excel(file, dtype=str)
             else:
                 try:
-                    df = pd.read_csv(file, encoding='utf-8')
+                    df = pd.read_csv(file, encoding='utf-8', dtype=str, low_memory=False)
                 except UnicodeDecodeError:
-                    df = pd.read_csv(file, encoding='latin-1')
+                    df = pd.read_csv(file, encoding='latin-1', dtype=str, low_memory=False)
                     warnings.warn(f"Used latin-1 encoding for {file.name}")
             
             # Check if dataframe is empty
@@ -402,6 +424,10 @@ def load_and_pivot_data(folder_path):
             
             # 2. Extract Vendor/Location from filename
             location_label = file.stem.split(" - ")[-1] if " - " in file.stem else file.stem
+            if include_parent_in_location:
+                rel_parent = file.parent.relative_to(folder)
+                if str(rel_parent) != ".":
+                    location_label = f"{rel_parent}_{location_label}"
     
             # 3. Identify which columns to keep (WITHOUT renaming them)
             # We check the standardized version but keep the original column name
@@ -437,11 +463,35 @@ def load_and_pivot_data(folder_path):
                 continue
             
             # Filter dataframe to only the columns we want
-            df = df[keep_cols]
+            df = df[keep_cols].copy()
+
+            # Build consistent fixed columns so all files share the same index schema
+            fixed_source_map = {}
+            for col in keep_cols:
+                std_name = get_standard_column(col)
+                if std_name in fixed_cols and std_name not in fixed_source_map:
+                    fixed_source_map[std_name] = col
+
+            for fixed_col in fixed_cols:
+                src_col = fixed_source_map.get(fixed_col)
+                if src_col is not None:
+                    df[fixed_col] = df[src_col].astype(str).str.strip()
+                else:
+                    df[fixed_col] = pd.NA
+
+            target_standard_cols = ["Dist Cost", "UOM", "Disc", "Net Price"]
+            data_cols = [
+                col for col in keep_cols
+                if get_standard_column(col) in target_standard_cols
+            ]
+
+            if not data_cols:
+                warnings.warn(f"File {file.name} has no pricing columns after filtering, skipping")
+                continue
     
             # 5. Set Index to the fixed columns (product identifiers)
-            # Use the ORIGINAL column names that map to our fixed columns
-            df = df.set_index([c for c in fixed_cols if c in df.columns])
+            df = df.set_index(fixed_cols)
+            df = df[data_cols]
     
             # 6. Add the Location label as a top-level column index (MultiIndex)
             df.columns = pd.MultiIndex.from_product([[location_label], df.columns])

@@ -1,3 +1,21 @@
+Week12
+o Progress: Working on the report based on the feedback and prepare my demo for client, moving the code to Google Colab.
+o Problems: Come up with an idea that makes the demo appealing but also show my ability.
+o Plans: Try multiple version to see the result, just need to put in a lot of hours.
+o Hours: 30 Hours
+
+Week11
+o Progress: Making digital profolio
+o Problems: Picking WIX back up took me some time
+o Plans: Follow youtube videos and look for templates
+o Hours: 17 Hours
+
+Week10
+o Progress: Finishing Python and writing final report
+o Problems: Decide what to put in the report while making sure I don't reveal the classified info.
+o Plans: Work harder
+o Hours: 22 Hours
+
 Week8
 o Progress: Switching to Python, working on the functions file.
 o Problems: It is hard to abandon what I have and switch completely to Python, time is limited.
