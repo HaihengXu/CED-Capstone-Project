@@ -114,45 +114,42 @@ def clean_pricing_data(df):
     if df.empty:
         raise ValueError("Input DataFrame is empty")
     
-    # Check required columns exist
-    required_columns = ["UPC", "Catalog #", "Net Price"]
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    
-    if missing_columns:
-        raise ValueError(f"Missing required columns: {missing_columns}. Available columns: {list(df.columns)}")
-    
-    # Create a copy to avoid modifying original
-    df = df.copy()
-    
-    original_count = len(df)
-    
-    # Rename key columns for processing (but keep originals)
-    df["upc"] = df["UPC"].astype(str).str.strip()
-    df["catalog_number"] = df["Catalog #"].astype(str).str.strip()
+   # 1. Map columns to their standard types WITHOUT renaming the actual dataframe yet
+    col_map = {col: get_standard_column(col) for col in df.columns}
+    inv_map = {v: k for k, v in col_map.items() if v is not None}
 
-    # Clean and convert net price with error handling
+    # 2. Check for requirements using the map
+    required = ["UPC", "Catalog #", "Net Price"]
+    missing = [r for r in required if r not in inv_map]
+    
+    if missing:
+        raise ValueError(f"Missing required data types: {missing}. Found: {list(df.columns)}")
+
+    # 3. Create internal aliases for processing while keeping original columns
+    df = df.copy()
+    df["upc"] = df[inv_map["UPC"]].astype(str).str.strip()
+    df["catalog_number"] = df[inv_map["Catalog #"]].astype(str).str.strip()
+    
+    # 4. Clean the price using whichever name the user provided (Net Price OR Net SPA Cost)
+    actual_price_col = inv_map["Net Price"]
     try:
         df["net_price"] = (
-            df["Net Price"]
+            df[actual_price_col]
             .astype(str)
             .str.replace(r"[\$,]", "", regex=True)
             .replace("", pd.NA)
         )
-        # Convert to float, coercing errors to NaN
         df["net_price"] = pd.to_numeric(df["net_price"], errors='coerce')
     except Exception as e:
-        raise ValueError(f"Error converting Net Price to numeric: {e}")
+        raise ValueError(f"Error converting {actual_price_col} to numeric: {e}")
 
-    # Remove rows with missing UPC or invalid prices
+    # 5. Filter out bad rows
+    original_count = len(df)
     df = df[df["upc"].notna() & (df["net_price"] > 0)]
     
-    # Validate we still have data after cleaning
     if df.empty:
-        raise ValueError(f"All {original_count} rows were removed during cleaning. Check your data for valid UPC and Net Price values.")
-    rows_removed = original_count - len(df)
+        raise ValueError("All rows removed during cleaning. Check UPC and Price values.")
 
-    if rows_removed > 0:
-        warnings.warn(f"Removed {rows_removed} rows ({rows_removed/original_count*100:.1f}%) with missing or invalid data")
     return df
 
 # The Analysis Engine
