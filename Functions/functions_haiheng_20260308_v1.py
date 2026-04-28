@@ -335,7 +335,7 @@ def get_standard_column(column_name):
     return None
 
 # Wide Format Data Loader
-def load_and_pivot_data(folder_path):
+def load_and_pivot_data(folder_path, recursive=False, include_parent_in_location=False):
     """
     Load pricing files and create a wide-format comparison with MultiIndex columns.
     
