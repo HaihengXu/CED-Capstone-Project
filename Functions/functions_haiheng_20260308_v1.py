@@ -301,7 +301,7 @@ def get_standard_column(column_name):
     
     # Define mapping patterns for common variations
     standardization_map = {
-        'net price': ['net price', 'net spa price', 'netprice', 'net_price'],
+        'net price': ['net price', 'Net SPA Price', 'netprice', 'net_price'],
         'dist cost': ['dist cost', 'distributor cost', 'distcost', 'dist_cost'],
         'uom': ['uom', 'unit of measure', 'unit'],
         'disc': ['disc', 'discount', 'disc%', 'discount%'],
