@@ -44,11 +44,7 @@ def run_pricing_etl(
 	out_dir.mkdir(parents=True, exist_ok=True)
 
 	print("[1/5] Loading pricing files...")
-	df_raw = load_pricing_files(
-		input_folder,
-		recursive=recursive,
-		include_parent_in_location=include_parent_in_location,
-	)
+	df_raw = load_pricing_files(input_folder)
 
 	print("[2/5] Cleaning pricing data...")
 	df_clean = clean_pricing_data(df_raw)
