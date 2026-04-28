@@ -286,12 +286,6 @@ def combine_with_original_data(df_clean, price_matrix):
 def get_standard_column(column_name):
     """
     Standardize varying column names to consistent names.
-    
-    Args:
-        column_name: Original column name from file
-        
-    Returns:
-        Standardized column name, or None if not a recognized column
     """
     if not isinstance(column_name, str):
         return None
@@ -299,8 +293,8 @@ def get_standard_column(column_name):
     # Convert to lowercase for case-insensitive matching
     col_lower = column_name.lower().strip()
     
-standardization_map = {
-        # ALL variations must be lowercase to match col_lower
+    # INDENT THIS BLOCK: It must be inside the function
+    standardization_map = {
         'net price': ['net price', 'net spa price', 'net spa cost', 'netprice', 'net_price'],
         'dist cost': ['dist cost', 'distributor cost', 'distcost', 'dist_cost'],
         'uom': ['uom', 'unit of measure', 'unit'],
@@ -311,10 +305,9 @@ standardization_map = {
         'description': ['description', 'desc', 'product description']
     }
     
-    # Check each standard name
+    # INDENT THIS LOOP: It also must be inside the function
     for standard_name, variations in standardization_map.items():
         if any(variation in col_lower for variation in variations):
-            # Return with proper casing
             if standard_name == 'mfrcode':
                 return 'MfrCode'
             elif standard_name == 'catalog #':
