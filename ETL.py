@@ -5,11 +5,11 @@ import shutil
 from pathlib import Path
 import sys
 
-# 1. Ensure the system can find your subfolders
+# Ensure folders are in the search path before importing
 sys.path.append('Functions')
 sys.path.append('Model')
 
-# 2. These imports must have ZERO spaces at the start of the line
+# These lines must be perfectly flushed to the left margin
 from functions_haiheng_20260308_v1 import load_pricing_files
 from pricingfiles_ETL_haiheng_20260308_v1 import run_pricing_etl
 
@@ -18,7 +18,7 @@ st.set_page_config(page_title="CED Pricing Analysis Tool", layout="wide")
 st.title("📊 Pricing ETL Analysis Tool")
 st.markdown("Upload your pricing files (CSV or XLSX) to generate a consolidated price matrix.")
 
-# 3. File Uploader
+# File Uploader
 uploaded_files = st.file_uploader(
     "Choose pricing files", 
     accept_multiple_files=True, 
@@ -31,7 +31,7 @@ if uploaded_files:
     
     if input_dir.exists():
         shutil.rmtree(input_dir)
-    input_dir.mkdir(exist_ok=True)
+    input_dir.mkdir(exist_ok=True, parents=True)
 
     for uploaded_file in uploaded_files:
         with open(input_dir / uploaded_file.name, "wb") as f:
