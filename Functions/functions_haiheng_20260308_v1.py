@@ -432,6 +432,11 @@ def load_and_pivot_data(folder_path, recursive=False, include_parent_in_location
             # 5. Set Index to the fixed columns (product identifiers)
             # Use the ORIGINAL column names that map to our fixed columns
             df = df.set_index([c for c in fixed_cols if c in df.columns])
+            # Drop duplicate rows based on these columns to prevent the concat error
+            if df.duplicated(subset=index_cols).any():
+            warnings.warn(f"File {file.name} has duplicate product entries. Keeping first occurrence.")
+            df = df.drop_duplicates(subset=index_cols)
+            df = df.set_index(index_cols)
     
             # 6. Add the Location label as a top-level column index (MultiIndex)
             df.columns = pd.MultiIndex.from_product([[location_label], df.columns])
