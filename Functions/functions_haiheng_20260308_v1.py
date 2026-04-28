@@ -299,9 +299,9 @@ def get_standard_column(column_name):
     # Convert to lowercase for case-insensitive matching
     col_lower = column_name.lower().strip()
     
-    # Define mapping patterns for common variations
-    standardization_map = {
-        'net price': ['net price', 'Net SPA Price', 'netprice', 'net_price'],
+standardization_map = {
+        # ALL variations must be lowercase to match col_lower
+        'net price': ['net price', 'net spa price', 'net spa cost', 'netprice', 'net_price'],
         'dist cost': ['dist cost', 'distributor cost', 'distcost', 'dist_cost'],
         'uom': ['uom', 'unit of measure', 'unit'],
         'disc': ['disc', 'discount', 'disc%', 'discount%'],
