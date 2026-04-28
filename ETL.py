@@ -3,11 +3,13 @@ import pandas as pd
 import os
 import shutil
 from pathlib import Path
-
-# Import your existing logic
 import sys
+
+# 1. Ensure the system can find your subfolders
 sys.path.append('Functions')
 sys.path.append('Model')
+
+# 2. These imports must have ZERO spaces at the start of the line
 from functions_haiheng_20260308_v1 import load_pricing_files
 from pricingfiles_ETL_haiheng_20260308_v1 import run_pricing_etl
 
@@ -16,7 +18,7 @@ st.set_page_config(page_title="CED Pricing Analysis Tool", layout="wide")
 st.title("📊 Pricing ETL Analysis Tool")
 st.markdown("Upload your pricing files (CSV or XLSX) to generate a consolidated price matrix.")
 
-# 1. File Uploader
+# 3. File Uploader
 uploaded_files = st.file_uploader(
     "Choose pricing files", 
     accept_multiple_files=True, 
@@ -24,7 +26,6 @@ uploaded_files = st.file_uploader(
 )
 
 if uploaded_files:
-    # Setup temporary directories for the session
     input_dir = Path("temp_input")
     output_dir = Path("temp_output")
     
@@ -32,18 +33,15 @@ if uploaded_files:
         shutil.rmtree(input_dir)
     input_dir.mkdir(exist_ok=True)
 
-    # Save uploaded files to the temp directory
     for uploaded_file in uploaded_files:
         with open(input_dir / uploaded_file.name, "wb") as f:
             f.write(uploaded_file.getbuffer())
 
     st.success(f"Successfully uploaded {len(uploaded_files)} files.")
 
-    # 2. Run Button
     if st.button("🚀 Run Pricing Analysis"):
         with st.spinner("Processing data..."):
             try:
-                # Execute your existing ETL function
                 results = run_pricing_etl(
                     folder_path=str(input_dir),
                     output_dir=str(output_dir)
@@ -52,7 +50,6 @@ if uploaded_files:
                 st.balloons()
                 st.divider()
                 
-                # 3. Display and Download Results
                 col1, col2 = st.columns(2)
                 
                 with col1:
@@ -62,8 +59,6 @@ if uploaded_files:
                 
                 with col2:
                     st.subheader("Download Reports")
-                    
-                    # Provide downloads for the key files your script generated
                     for label, path in results.items():
                         with open(path, "rb") as f:
                             st.download_button(
