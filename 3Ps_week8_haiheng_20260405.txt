@@ -1,3 +1,15 @@
+Week15
+o Progress: Presented the tool to the client, finalizing the deliverables.
+o Problems: N/A
+o Plans: N/A
+o Hours: 5 Hours
+
+Week14
+o Progress: Working on the presentation for the client
+o Problems: The usability of Colab for someone who is not familiar with codes
+o Plans: Try to use Streamlit to host the code and make it user-friendly.
+o Hours: 15 Hours
+
 Week12
 o Progress: Working on the report based on the feedback and prepare my demo for client, moving the code to Google Colab.
 o Problems: Come up with an idea that makes the demo appealing but also show my ability.
