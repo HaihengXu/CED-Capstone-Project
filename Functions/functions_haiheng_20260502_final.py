@@ -26,7 +26,7 @@ _COL_ALIASES = {
     "material        ": "catalog_num", "material_number": "catalog_num",
     "material code": "catalog_num",
     "catalog #": "catalog_num", "catalog": "catalog_num",
-    "mfr": "catalog_num", "product": "catalog_num",
+    "product": "catalog_num",
     "catalog no.": "catalog_num", "catalog no": "catalog_num",
     "item number": "catalog_num",
     # Description
@@ -36,6 +36,7 @@ _COL_ALIASES = {
     "distributor price each": "net_price_each",
     "price": "net_price_each",
     "net price": "net_price_each",
+    "net spa cost": "net_price_each",
     "net_price (silver)": "net_price_each",
     "net": "net_price_each",
     "net cost": "net_price_each",
@@ -44,6 +45,7 @@ _COL_ALIASES = {
     # Pricing group / manufacturer
     "pricing group": "pricing_group", "prod group desc": "pricing_group",
     "mfrcode": "pricing_group", "brand": "pricing_group",
+    "mfr": "pricing_group",
     "mpg": "pricing_group", "pricing type": "pricing_group",
 }
 
@@ -89,7 +91,12 @@ def _location_from_filename(filename: str) -> str:
     if m:
         return f"FILE-{m.group(1)[:8]}"
 
-    return re.sub(r'[^A-Za-z0-9\-]', '-', stem)[:30]
+    # General: replace " - " and spaces with single dash, then collapse runs
+    slug = re.sub(r'\s*-\s*', '-', stem)          # " - " → "-"
+    slug = re.sub(r'[^A-Za-z0-9\-]', '-', slug)   # anything else → "-"
+    slug = re.sub(r'-{2,}', '-', slug)             # collapse "--+" → "-"
+    slug = slug.strip('-')
+    return slug[:40]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -233,6 +240,22 @@ def _detect_format(filepath: str) -> str:
         wb.close()
         if "purchaser id" in row0 and "net price" in row0:
             return "format_g"
+    except Exception:
+        pass
+
+    # Format H: ISCF / SPA export — sheet named "export" or "Items"
+    #           with "catalog #" in the first header row
+    try:
+        wb = load_workbook(filepath, read_only=True)
+        for sheet_name in wb.sheetnames:
+            if sheet_name.lower() in ("export", "items"):
+                ws = wb[sheet_name]
+                first = next(ws.iter_rows(max_row=1, values_only=True), ())
+                row0 = [_strip(v) if v else "" for v in first]
+                if "catalog #" in row0:
+                    wb.close()
+                    return "format_h"
+        wb.close()
     except Exception:
         pass
 
@@ -448,6 +471,32 @@ def _load_format_g(filepath, location):
     return _scrub_df(out, ["description", "pricing_group"])
 
 
+def _load_format_h(filepath, location):
+    """ISCF / SPA export sheet — 'export' or 'Items' sheet, 'Catalog #' header.
+    Handles both Net Price (ISCF) and Net SPA Cost (SPA) variants."""
+    wb = load_workbook(filepath, read_only=True)
+    target_sheet = next(
+        (s for s in wb.sheetnames if s.lower() in ("export", "items")), None
+    )
+    wb.close()
+    if target_sheet is None:
+        raise ValueError("No 'export' or 'Items' sheet found.")
+
+    df = pd.read_excel(filepath, sheet_name=target_sheet,
+                       header=0, dtype=str, engine="openpyxl")
+    df.columns = df.columns.str.strip()
+    # Drop rows where Catalog # is blank (e.g. subtotals, group header rows)
+    if "Catalog #" in df.columns:
+        df = df[df["Catalog #"].notna() & (df["Catalog #"].str.strip() != "")]
+    mapping = _map_columns(df)
+    needed = {"catalog_num", "net_price_each"}
+    if needed - set(mapping.keys()):
+        raise ValueError(
+            f"Missing: {needed - set(mapping.keys())}. Found: {list(df.columns)}"
+        )
+    return _build_output(df, mapping, location, filepath, "format_h")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
@@ -464,6 +513,7 @@ def load_pricing_file(filepath: str) -> tuple:
         "format_e": _load_format_e,
         "format_f": _load_format_f,
         "format_g": _load_format_g,
+        "format_h": _load_format_h,
     }
 
     if fmt == "unknown":
@@ -480,8 +530,13 @@ def load_pricing_file(filepath: str) -> tuple:
 
 def load_pricing_files(folder_path: str) -> tuple:
     folder = Path(folder_path)
-    files  = (list(folder.glob("*.xlsx")) + list(folder.glob("*.XLSX")) +
-              list(folder.glob("*.xls"))  + list(folder.glob("*.csv")))
+    seen, files = set(), []
+    for p in (list(folder.glob("*.xlsx")) + list(folder.glob("*.XLSX")) +
+              list(folder.glob("*.xls"))  + list(folder.glob("*.csv"))):
+        key = p.resolve()
+        if key not in seen:
+            seen.add(key)
+            files.append(p)
 
     if not files:
         return pd.DataFrame(columns=STANDARD_COLS), ["No pricing files found."]

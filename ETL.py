@@ -49,6 +49,7 @@ with st.sidebar:
 | **E** | SpreadsheetML .xls | Price Break1 |
 | **F** | TB/ABB SPA claimback | Final Net Price (1) |
 | **G** | SPAPriceFile (Purchaser ID) | Net Price |
+| **H** | ISCF / SPA export sheet | Net Price / Net SPA Cost |
 
 Files that don't match any format are skipped — they won't crash the run.
     """)
@@ -88,6 +89,7 @@ FMT_LABELS = {
     "format_e": "✅ Format E (SpreadsheetML)",
     "format_f": "✅ Format F (TB/ABB SPA)",
     "format_g": "✅ Format G (SPAPriceFile)",
+    "format_h": "✅ Format H (ISCF/SPA export)",
     "unknown":  "⚠️ Unknown — will be skipped",
 }
 
@@ -157,7 +159,10 @@ if st.button("🚀 Run Pricing Analysis", type="primary"):
 
     with col_wide:
         st.subheader("Wide Matrix (price comparison)")
-        wide_df = pd.read_csv(results["wide"])
+        try:
+            wide_df = pd.read_csv(results["wide"])
+        except pd.errors.EmptyDataError:
+            wide_df = pd.DataFrame()
         if wide_df.empty:
             st.info("No data to display.")
         else:
@@ -185,7 +190,10 @@ if st.button("🚀 Run Pricing Analysis", type="primary"):
 
     with col_long:
         st.subheader("Long Format (all rows)")
-        long_df = pd.read_csv(results["long"])
+        try:
+            long_df = pd.read_csv(results["long"])
+        except pd.errors.EmptyDataError:
+            long_df = pd.DataFrame()
         if long_df.empty:
             st.info("No data to display.")
         else:
