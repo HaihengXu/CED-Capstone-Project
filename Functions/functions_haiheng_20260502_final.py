@@ -1,500 +1,313 @@
-import pandas as pd
-from pathlib import Path
+import os
+import re
 import warnings
+import pandas as pd
+from openpyxl import load_workbook
+from pathlib import Path
 
-# This function handles the "messy" reality of folder management
-def load_pricing_files(folder_path):
+warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
+
+# ---------------------------------------------------------------------------
+# Canonical column names used throughout the pipeline
+# ---------------------------------------------------------------------------
+STANDARD_COLS = ["location", "upc", "catalog_num", "description",
+                 "net_price_each", "pricing_group", "source_file", "format"]
+
+# ---------------------------------------------------------------------------
+# Column alias maps (lower-stripped keys → standard name)
+# ---------------------------------------------------------------------------
+_COL_ALIASES = {
+    # UPC
+    "upc code": "upc",
+    "upc": "upc",
+    "upc         ": "upc",   # Hubbell pads with spaces
+
+    # Catalog / Item number
+    "item": "catalog_num",
+    "material": "catalog_num",
+    "material        ": "catalog_num",
+    "catalog #": "catalog_num",
+    "catalog": "catalog_num",
+    "mfr": "catalog_num",
+
+    # Description
+    "description": "description",
+    "description                                          ": "description",
+
+    # Net price
+    "distributor price each": "net_price_each",
+    "price": "net_price_each",
+    "net price": "net_price_each",
+    "net cost": "net_price_each",
+    "net spa price": "net_price_each",
+    "net": "net_price_each",
+
+    # Pricing group / manufacturer
+    "pricing group": "pricing_group",
+    "prod group desc": "pricing_group",
+    "mfrcode": "pricing_group",
+
+    # Location  (parsed from filename / customer info sheet — not a column alias)
+}
+
+
+def _strip_alias(col: str) -> str:
+    """Normalise a column header for alias lookup."""
+    return str(col).strip().lower()
+
+
+def _map_columns(df: pd.DataFrame) -> dict:
+    """Return a dict of {standard_name: actual_col} for columns found in df."""
+    mapping = {}
+    for col in df.columns:
+        alias = _strip_alias(col)
+        if alias in _COL_ALIASES:
+            std = _COL_ALIASES[alias]
+            if std not in mapping:          # first match wins
+                mapping[std] = col
+    return mapping
+
+
+# ---------------------------------------------------------------------------
+# Location extraction from filename
+# ---------------------------------------------------------------------------
+def _location_from_filename(filename: str) -> str:
     """
-    Load and combine pricing files from a folder.
-    
-    Args:
-        folder_path: Path to folder containing Excel/CSV files
-        
-    Returns:
-        Combined DataFrame with all pricing data
-        
-    Raises:
-        ValueError: If folder doesn't exist or no valid files found
-        TypeError: If folder_path is not a valid path type
+    Extract a human-readable location tag from the filename.
+    Examples:
+      '2808_CED-GREA_02-09-2026__1_.xlsx'  → 'CED-GREA'
+      '0757_209066_-_CED_-_BOISE__ID_-_3A.xlsx' → 'CED-BOISE-ID'
+    Falls back to the stem if no pattern matches.
     """
-    # Input validation
-    if folder_path is None:
-        raise ValueError("folder_path cannot be None")
-    
+    stem = Path(filename).stem
+
+    # Pattern A: NNNN_CED-LOC_date…
+    m = re.search(r'\d+_(CED-[A-Z]+)_', stem)
+    if m:
+        return m.group(1)
+
+    # Pattern B: NNNN_ACCT_-_CED_-_CITY__STATE_-_…
+    m = re.search(r'CED_-_([A-Z]+)__([A-Z]{2})', stem)
+    if m:
+        return f"CED-{m.group(1)}-{m.group(2)}"
+
+    # Fallback: use whole stem, cleaned up
+    return re.sub(r'[^A-Za-z0-9\-]', '-', stem)[:40]
+
+
+# ---------------------------------------------------------------------------
+# Format detectors
+# ---------------------------------------------------------------------------
+def _detect_format(filepath: str) -> str:
+    """
+    Peek at the file and decide which format it is.
+    Returns: 'format_a', 'format_b', or 'unknown'
+    """
     try:
-        folder = Path(folder_path)
-    except (TypeError, ValueError) as e:
-        raise TypeError(f"Invalid folder_path type: {e}")
-    
-    # Check if folder exists
-    if not folder.exists():
-        raise ValueError(f"Folder does not exist: {folder_path}")
-    
-    if not folder.is_dir():
-        raise ValueError(f"Path is not a directory: {folder_path}")
-    
-    dfs = []
-    errors = []
+        wb = load_workbook(filepath, read_only=True)
+        sheets = wb.sheetnames
+        wb.close()
+    except Exception:
+        return "unknown"
 
-    # Use a pattern that catches both extensions
-    # .glob("*") or filtering within the loop is safest
-    for file in folder.glob("*"):
-        # Skip directories and temporary Excel lock files
-        if file.is_dir() or file.name.startswith("~$"):
-            continue
-            
-        # Check the file extension
-        ext = file.suffix.lower()
-        
-        try:
-            if ext == ".xlsx":
-                df = pd.read_excel(file, dtype=str)
-            elif ext == ".csv":
-                # CSVs often need an encoding specified if they have special characters
-                try:
-                    df = pd.read_csv(file, dtype=str, encoding='utf-8')
-                except UnicodeDecodeError:
-                    # Try alternative encodings
-                    df = pd.read_csv(file, dtype=str, encoding='latin-1')
-                    warnings.warn(f"Used latin-1 encoding for {file.name}")
-            else:
-                # Skip files that aren't Excel or CSV
-                continue
-            
-            # Check if dataframe is empty
-            if df.empty:
-                warnings.warn(f"File {file.name} is empty, skipping")
-                continue
+    if "Price List" not in sheets:
+        return "unknown"
 
-            # Extract location code from filename
-            location = file.stem.split(" - ")[-1] if " - " in file.stem else file.stem
-            df["location"] = location
+    try:
+        wb = load_workbook(filepath, read_only=True)
+        ws = wb["Price List"]
+        rows = list(ws.iter_rows(max_row=10, values_only=True))
+        wb.close()
+    except Exception:
+        return "unknown"
 
-            dfs.append(df)
-            
-        except Exception as e:
-            # Track errors but continue processing other files
-            errors.append(f"{file.name}: {str(e)}")
-            continue
+    # Format A: row 0 has "Pricing Group" or "Item"
+    if rows:
+        first_row = [str(v).strip().lower() if v else "" for v in rows[0]]
+        if "pricing group" in first_row or "item" in first_row:
+            return "format_a"
 
-    # Report any errors encountered
-    if errors:
-        warnings.warn(f"Errors encountered while loading {len(errors)} file(s): {errors}")
-    
-    if not dfs:
-        raise ValueError(f"No valid Excel or CSV files found in the directory: {folder_path}")
+    # Format B: row 5 (index 5) has "UPC" / "MATERIAL" / "DESCRIPTION"
+    if len(rows) > 5:
+        row5 = [str(v).strip().lower() if v else "" for v in rows[5]]
+        if "upc         " in row5 or "upc" in row5 or "material" in row5:
+            return "format_b"
 
-    combined_df = pd.concat(dfs, ignore_index=True)
-    
-    # Validate the combined dataframe has data
-    if combined_df.empty:
-        raise ValueError("Combined dataframe is empty")
-    
-    return combined_df
+    return "unknown"
 
-# Data Cleaning
-def clean_pricing_data(df):
+
+# ---------------------------------------------------------------------------
+# Loaders per format
+# ---------------------------------------------------------------------------
+def _load_format_a(filepath: str, location: str) -> pd.DataFrame:
     """
-    Clean and validate pricing data.
-    
-    Args:
-        df: DataFrame with pricing data
-        
-    Returns:
-        Cleaned DataFrame
-        
-    Raises:
-        ValueError: If required columns are missing or data is invalid
-        TypeError: If input is not a DataFrame
+    Format A: multi-vendor Bridgeport-style files.
+    Sheet "Price List", headers on row 0.
     """
-    # Input validation
-    if not isinstance(df, pd.DataFrame):
-        raise TypeError("Input must be a pandas DataFrame")
-    
-    if df.empty:
-        raise ValueError("Input DataFrame is empty")
-    
-   # 1. Map columns to their standard types WITHOUT renaming the actual dataframe yet
-    col_map = {col: get_standard_column(col) for col in df.columns}
-    inv_map = {v: k for k, v in col_map.items() if v is not None}
+    df = pd.read_excel(filepath, sheet_name="Price List",
+                       header=0, dtype=str, engine="openpyxl")
+    df.columns = df.columns.str.strip()
 
-    # 2. Check for requirements using the map
-    required = ["UPC", "Catalog #", "Net Price"]
-    missing = [r for r in required if r not in inv_map]
-    
+    mapping = _map_columns(df)
+    needed = {"upc", "catalog_num", "description", "net_price_each"}
+    missing = needed - set(mapping.keys())
     if missing:
-        raise ValueError(f"Missing required data types: {missing}. Found: {list(df.columns)}")
+        raise ValueError(f"Format A missing columns: {missing}. "
+                         f"Found: {list(df.columns)}")
 
-    # 3. Create internal aliases for processing while keeping original columns
-    df = df.copy()
-    df["upc"] = df[inv_map["UPC"]].astype(str).str.strip()
-    df["catalog_number"] = df[inv_map["Catalog #"]].astype(str).str.strip()
-    
-    # 4. Clean the price using whichever name the user provided (Net Price OR Net SPA Cost)
-    actual_price_col = inv_map["Net Price"]
+    out = pd.DataFrame()
+    out["upc"]           = df[mapping["upc"]].astype(str).str.strip()
+    out["catalog_num"]   = df[mapping["catalog_num"]].astype(str).str.strip()
+    out["description"]   = df[mapping["description"]].astype(str).str.strip()
+    out["net_price_each"] = pd.to_numeric(
+        df[mapping["net_price_each"]].astype(str).str.replace(r'[,$]', '', regex=True),
+        errors="coerce")
+    out["pricing_group"] = (df[mapping["pricing_group"]].astype(str).str.strip()
+                            if "pricing_group" in mapping else "")
+    out["location"]      = location
+    out["source_file"]   = Path(filepath).name
+    out["format"]        = "format_a"
+    return out.dropna(subset=["net_price_each"])
+
+
+def _load_format_b(filepath: str, location: str) -> pd.DataFrame:
+    """
+    Format B: Hubbell 3A distributor cost sheets.
+    Sheet "Price List", real headers at row 5 (skiprows=5).
+    """
+    df = pd.read_excel(filepath, sheet_name="Price List",
+                       skiprows=5, header=0, dtype=str, engine="openpyxl")
+    # Drop the leading empty column (col A is blank in these files)
+    df = df.dropna(axis=1, how="all")
+    df.columns = df.columns.str.strip()
+
+    mapping = _map_columns(df)
+    needed = {"upc", "catalog_num", "description", "net_price_each"}
+    missing = needed - set(mapping.keys())
+    if missing:
+        raise ValueError(f"Format B missing columns: {missing}. "
+                         f"Found: {list(df.columns)}")
+
+    out = pd.DataFrame()
+    out["upc"]           = df[mapping["upc"]].astype(str).str.strip()
+    out["catalog_num"]   = df[mapping["catalog_num"]].astype(str).str.strip()
+    out["description"]   = df[mapping["description"]].astype(str).str.strip()
+    out["net_price_each"] = pd.to_numeric(
+        df[mapping["net_price_each"]].astype(str).str.replace(r'[,$]', '', regex=True),
+        errors="coerce")
+    out["pricing_group"] = (df[mapping["pricing_group"]].astype(str).str.strip()
+                            if "pricing_group" in mapping else "")
+    out["location"]      = location
+    out["source_file"]   = Path(filepath).name
+    out["format"]        = "format_b"
+    return out.dropna(subset=["net_price_each"])
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+def load_pricing_file(filepath: str) -> tuple[pd.DataFrame, str]:
+    """
+    Load a single pricing file and return (dataframe, status_message).
+    The dataframe always has STANDARD_COLS columns.
+    On failure returns (empty_df, error_message).
+    """
+    filename = Path(filepath).name
+    location = _location_from_filename(filename)
+    fmt = _detect_format(filepath)
+
     try:
-        df["net_price"] = (
-            df[actual_price_col]
-            .astype(str)
-            .str.replace(r"[\$,]", "", regex=True)
-            .replace("", pd.NA)
-        )
-        df["net_price"] = pd.to_numeric(df["net_price"], errors='coerce')
+        if fmt == "format_a":
+            df = _load_format_a(filepath, location)
+            return df, f"✅ {filename} → {location} [{fmt}, {len(df):,} rows]"
+        elif fmt == "format_b":
+            df = _load_format_b(filepath, location)
+            return df, f"✅ {filename} → {location} [{fmt}, {len(df):,} rows]"
+        else:
+            return (pd.DataFrame(columns=STANDARD_COLS),
+                    f"⚠️  {filename} — unrecognised format, skipped")
     except Exception as e:
-        raise ValueError(f"Error converting {actual_price_col} to numeric: {e}")
+        return (pd.DataFrame(columns=STANDARD_COLS),
+                f"❌ {filename} — error: {e}")
 
-    # 5. Filter out bad rows
-    original_count = len(df)
-    df = df[df["upc"].notna() & (df["net_price"] > 0)]
-    
+
+def load_pricing_files(folder_path: str) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Load all .xlsx / .csv files in folder_path.
+    Returns (combined_df, list_of_status_messages).
+    """
+    folder = Path(folder_path)
+    files = list(folder.glob("*.xlsx")) + list(folder.glob("*.csv"))
+
+    if not files:
+        return pd.DataFrame(columns=STANDARD_COLS), ["No .xlsx/.csv files found."]
+
+    frames, messages = [], []
+    for fp in sorted(files):
+        df, msg = load_pricing_file(str(fp))
+        messages.append(msg)
+        if not df.empty:
+            frames.append(df)
+
+    combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=STANDARD_COLS)
+    return combined, messages
+
+
+# ---------------------------------------------------------------------------
+# Wide-format comparison matrix
+# ---------------------------------------------------------------------------
+def build_wide_matrix(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Pivot the combined long DataFrame into a wide comparison matrix.
+
+    Index: catalog_num  (primary), upc, description (carried along)
+    Columns: one column per location → net_price_each
+
+    Also computes: best_price, best_location, price_spread, is_tied.
+    """
     if df.empty:
-        raise ValueError("All rows removed during cleaning. Check UPC and Price values.")
+        return pd.DataFrame()
 
-    return df
+    # Deduplicate: if same location has same catalog_num, keep lowest price
+    df_dedup = (df.sort_values("net_price_each")
+                  .drop_duplicates(subset=["catalog_num", "location"], keep="first"))
 
-# The Analysis Engine
-def create_price_matrix(df):
-    """
-    Create a price comparison matrix showing prices across different locations.
-    
-    Args:
-        df: Cleaned DataFrame with pricing data
-        
-    Returns:
-        Price matrix with best price analysis
-        
-    Raises:
-        ValueError: If required columns missing or data invalid
-        TypeError: If input is not a DataFrame
-    """
-    # Input validation
-    if not isinstance(df, pd.DataFrame):
-        raise TypeError("Input must be a pandas DataFrame")
-    
-    if df.empty:
-        raise ValueError("Input DataFrame is empty")
-    
-    # Check required columns
-    required_columns = ["upc", "location", "net_price"]
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    
-    if missing_columns:
-        raise ValueError(f"Missing required columns: {missing_columns}. Available columns: {list(df.columns)}")
-    
-    # Check for at least one location
-    unique_locations = df["location"].nunique()
-    if unique_locations == 0:
-        raise ValueError("No locations found in data")
-    
-    try:
-        price_matrix = (
-            df.pivot_table(
-                index="upc",
-                columns="location",
-                values="net_price",
-                aggfunc="min"
-            )
-            .reset_index()
-        )
-    except Exception as e:
-        raise ValueError(f"Error creating pivot table: {e}")
-    
-    if price_matrix.empty:
-        raise ValueError("Price matrix is empty after pivot operation")
+    # Carry description and upc from the first occurrence of each catalog_num
+    meta = (df_dedup.drop_duplicates(subset=["catalog_num"], keep="first")
+                    [["catalog_num", "upc", "description", "pricing_group"]])
 
-    price_cols = price_matrix.columns.drop("upc")
-    
-    if len(price_cols) == 0:
-        raise ValueError("No price columns found after pivot")
-
-    price_matrix["best_price"] = price_matrix[price_cols].min(axis=1)
-    price_matrix["best_location"] = price_matrix[price_cols].idxmin(axis=1)
-
-    price_matrix["price_spread"] = (
-        price_matrix[price_cols].max(axis=1) - price_matrix["best_price"]
+    pivot = df_dedup.pivot_table(
+        index="catalog_num",
+        columns="location",
+        values="net_price_each",
+        aggfunc="min"
     )
+    pivot.columns.name = None
+    pivot = pivot.reset_index()
 
-    price_matrix["tie_flag"] = (
-        price_matrix[price_cols]
-        .eq(price_matrix["best_price"], axis=0)
-        .sum(axis=1) > 1
-    )
-    
-    return price_matrix
+    wide = meta.merge(pivot, on="catalog_num", how="right")
 
-# Final Merging
-def combine_with_original_data(df_clean, price_matrix):
-    """
-    Merge the calculated price analysis columns back to the original data.
-    This keeps all original columns and adds the new calculated columns.
-    
-    Args:
-        df_clean: Cleaned pricing DataFrame
-        price_matrix: Price matrix with calculated columns
-        
-    Returns:
-        Combined DataFrame with original and calculated columns
-        
-    Raises:
-        ValueError: If required columns missing
-        TypeError: If inputs are not DataFrames
-    """
-    # Input validation
-    if not isinstance(df_clean, pd.DataFrame):
-        raise TypeError("df_clean must be a pandas DataFrame")
-    
-    if not isinstance(price_matrix, pd.DataFrame):
-        raise TypeError("price_matrix must be a pandas DataFrame")
-    
-    if df_clean.empty:
-        raise ValueError("df_clean is empty")
-    
-    if price_matrix.empty:
-        raise ValueError("price_matrix is empty")
-    
-    # Check required columns exist
-    if "upc" not in df_clean.columns:
-        raise ValueError("df_clean missing 'upc' column")
-    
-    # Select only the calculated columns from price_matrix to merge
-    calculated_cols = ["upc", "best_price", "best_location", "price_spread", "tie_flag"]
-    missing_cols = [col for col in calculated_cols if col not in price_matrix.columns]
-    
-    if missing_cols:
-        raise ValueError(f"price_matrix missing required columns: {missing_cols}")
-    
-    price_info = price_matrix[calculated_cols]
-    
-    # Merge back to original data based on UPC
-    try:
-        df_final = df_clean.merge(price_info, on="upc", how="left")
-    except Exception as e:
-        raise ValueError(f"Error merging dataframes: {e}")
-    
-    # Validate merge results
-    if df_final.empty:
-        raise ValueError("Merged dataframe is empty")
-    
-    # Check for unmatched rows
-    unmatched = df_final["best_price"].isna().sum()
-    if unmatched > 0:
-        warnings.warn(f"{unmatched} rows ({unmatched/len(df_final)*100:.1f}%) did not match in merge")
-    
-    return df_final
+    # Price analytics
+    price_cols = [c for c in wide.columns
+                  if c not in {"catalog_num", "upc", "description",
+                               "pricing_group", "best_price",
+                               "best_location", "price_spread", "is_tied"}]
 
-# Helper function for column name standardization
-def get_standard_column(column_name):
-    """
-    Standardize varying column names to consistent names.
-    """
-    if not isinstance(column_name, str):
-        return None
-    
-    # Convert to lowercase for case-insensitive matching
-    col_lower = column_name.lower().strip()
-    
-    # INDENT THIS BLOCK: It must be inside the function
-    standardization_map = {
-        'net price': ['net price', 'net spa price', 'net spa cost', 'netprice', 'net_price'],
-        'dist cost': ['dist cost', 'distributor cost', 'distcost', 'dist_cost'],
-        'uom': ['uom', 'unit of measure', 'unit'],
-        'disc': ['disc', 'discount', 'disc%', 'discount%'],
-        'mfrcode': ['mfrcode', 'mfr code', 'manufacturer code', 'mfr_code'],
-        'catalog #': ['catalog #', 'catalog', 'catalog number', 'catalog_number'],
-        'upc': ['upc', 'upc code', 'upc_code'],
-        'description': ['description', 'desc', 'product description']
-    }
-    
-    # INDENT THIS LOOP: It also must be inside the function
-    for standard_name, variations in standardization_map.items():
-        if any(variation in col_lower for variation in variations):
-            if standard_name == 'mfrcode':
-                return 'MfrCode'
-            elif standard_name == 'catalog #':
-                return 'Catalog #'
-            elif standard_name == 'upc':
-                return 'UPC'
-            elif standard_name == 'description':
-                return 'Description'
-            elif standard_name == 'net price':
-                return 'Net Price'
-            elif standard_name == 'dist cost':
-                return 'Dist Cost'
-            elif standard_name == 'uom':
-                return 'UOM'
-            elif standard_name == 'disc':
-                return 'Disc'
-    
-    return None
+    wide["best_price"]    = wide[price_cols].min(axis=1)
+    wide["best_location"] = wide[price_cols].idxmin(axis=1)
+    wide["price_spread"]  = wide[price_cols].max(axis=1) - wide[price_cols].min(axis=1)
+    wide["is_tied"]       = wide[price_cols].apply(
+        lambda row: row.dropna().nunique() == 1 and row.notna().sum() > 1, axis=1)
 
-# Wide Format Data Loader
-def load_and_pivot_data(folder_path, recursive=False, include_parent_in_location=False):
-    """
-    Load pricing files and create a wide-format comparison with MultiIndex columns.
-    
-    This function creates a side-by-side comparison where:
-    - Rows are indexed by product identifiers (MfrCode, Catalog #, UPC, Description)
-    - Columns are grouped by location with pricing details underneath
-    - Allows easy visual comparison of the same product across locations
-    
-    Args:
-        folder_path: Path to folder containing Excel/CSV files
-        
-    Returns:
-        DataFrame with MultiIndex columns: (Location, PricingField)
-        
-    Raises:
-        ValueError: If folder doesn't exist or no valid files found
-        TypeError: If folder_path is not a valid path type
-    """
-    # Input validation
-    if folder_path is None:
-        raise ValueError("folder_path cannot be None")
-    
-    try:
-        folder = Path(folder_path)
-    except (TypeError, ValueError) as e:
-        raise TypeError(f"Invalid folder_path type: {e}")
-    
-    # Check if folder exists
-    if not folder.exists():
-        raise ValueError(f"Folder does not exist: {folder_path}")
-    
-    if not folder.is_dir():
-        raise ValueError(f"Path is not a directory: {folder_path}")
-    
-    all_dfs = []
-    errors = []
+    # Reorder: meta columns first, then location prices, then analytics
+    meta_cols      = ["catalog_num", "upc", "description", "pricing_group"]
+    analytic_cols  = ["best_price", "best_location", "price_spread", "is_tied"]
+    col_order      = meta_cols + price_cols + analytic_cols
+    col_order      = [c for c in col_order if c in wide.columns]
+    return wide[col_order]
 
-    # 1. Identify first 4 fixed columns (product identifiers)
-    fixed_cols = ["MfrCode", "Catalog #", "UPC", "Description"]
-    
-    for file in folder.glob("*"):
-        # Skip non-data files
-        if file.suffix.lower() not in ['.xlsx', '.csv'] or file.name.startswith("~$"):
-            continue
-        
-        try:
-            # Load file based on extension
-            if file.suffix.lower() == '.xlsx':
-                df = pd.read_excel(file)
-            else:
-                try:
-                    df = pd.read_csv(file, encoding='utf-8')
-                except UnicodeDecodeError:
-                    df = pd.read_csv(file, encoding='latin-1')
-                    warnings.warn(f"Used latin-1 encoding for {file.name}")
-            
-            # Check if dataframe is empty
-            if df.empty:
-                warnings.warn(f"File {file.name} is empty, skipping")
-                continue
-            
-            # 2. Extract Vendor/Location from filename
-            location_label = file.stem.split(" - ")[-1] if " - " in file.stem else file.stem
-    
-            # 3. Identify which columns to keep (WITHOUT renaming them)
-            # We check the standardized version but keep the original column name
-            keep_cols = []
-            
-            # First, add the fixed columns (product identifiers) if they exist
-            for col in df.columns:
-                std_name = get_standard_column(col)
-                if std_name in fixed_cols and col not in keep_cols:
-                    keep_cols.append(col)
-            
-            # Then, add pricing/data columns we want to track
-            target_standard_cols = ["Dist Cost", "UOM", "Disc", "Net Price"]
-            for col in df.columns:
-                std_name = get_standard_column(col)
-                if std_name in target_standard_cols and col not in keep_cols:
-                    keep_cols.append(col)
-            
-            if not keep_cols:
-                warnings.warn(f"File {file.name} has no recognizable columns, skipping")
-                continue
-            
-            # Verify we have at least some fixed columns for indexing
-            # Identify which of the kept columns are actually the fixed/index columns
-            available_fixed = []
-            for col in keep_cols:
-                std_name = get_standard_column(col)
-                if std_name in fixed_cols:
-                    available_fixed.append(col)  # Use ORIGINAL column name
-            
-            if not available_fixed:
-                warnings.warn(f"File {file.name} missing all index columns, skipping")
-                continue
-            
-            # Filter dataframe to only the columns we want
-            df = df[keep_cols]
-    
-            # 5. Set Index to the fixed columns (product identifiers)
-            # Use the ORIGINAL column names that map to our fixed columns
-            df = df.set_index([c for c in fixed_cols if c in df.columns])
-    
-            # 6. Add the Location label as a top-level column index (MultiIndex)
-            df.columns = pd.MultiIndex.from_product([[location_label], df.columns])
-            
-            all_dfs.append(df)
-            
-        except Exception as e:
-            # Track errors but continue processing other files
-            errors.append(f"{file.name}: {str(e)}")
-            continue
-    
-    # Report any errors encountered
-    if errors:
-        warnings.warn(f"Errors encountered while loading {len(errors)} file(s): {errors}")
-    
-    if not all_dfs:
-        raise ValueError(f"No valid Excel or CSV files found in the directory: {folder_path}")
-    
-    # 7. Concatenate all DataFrames horizontally (side-by-side)
-    try:
-        wide_df = pd.concat(all_dfs, axis=1)
-    except Exception as e:
-        raise ValueError(f"Error combining dataframes: {e}")
-    
-    # Validate result
-    if wide_df.empty:
-        raise ValueError("Combined dataframe is empty")
-    
-    return wide_df
 
-# Helper function for analyzing wide-format data
-def get_columns_by_standard_name(df, standard_name):
-    """
-    Find all columns in a MultiIndex DataFrame that match a standard column type.
-    
-    Useful for analysis on wide-format data where column names may vary across locations.
-    For example, find all "Net Price" columns even if some are named "Net SPA Price".
-    
-    Args:
-        df: DataFrame with MultiIndex columns (Location, ColumnName)
-        standard_name: The standard column name to search for (e.g., "Net Price")
-        
-    Returns:
-        List of (location, original_column_name) tuples that match the standard name
-        
-    Example:
-        >>> net_price_cols = get_columns_by_standard_name(df, "Net Price")
-        >>> # Returns: [('NYC', 'Net Price'), ('LA', 'Net SPA Price'), ...]
-        >>> # Now you can access: df[net_price_cols]
-    """
-    if not isinstance(df, pd.DataFrame):
-        raise TypeError("Input must be a pandas DataFrame")
-    
-    if not isinstance(df.columns, pd.MultiIndex):
-        raise ValueError("DataFrame must have MultiIndex columns (Location, ColumnName)")
-    
-    matching_cols = []
-    
-    # Iterate through all column combinations in the MultiIndex
-    for location, col_name in df.columns:
-        # Check if this column's standardized name matches what we're looking for
-        std_name = get_standard_column(col_name)
-        if std_name == standard_name:
-            matching_cols.append((location, col_name))
-    
-    return matching_cols
+def get_standard_column(df: pd.DataFrame, standard_name: str) -> list:
+    """Return all columns in df that map to the given standard name."""
+    return [col for col in df.columns if _strip_alias(col) in _COL_ALIASES
+            and _COL_ALIASES[_strip_alias(col)] == standard_name]
