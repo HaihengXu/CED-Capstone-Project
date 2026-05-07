@@ -43,7 +43,7 @@ def run_pricing_etl(folder_path: str, output_dir: str) -> dict:
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 3:
-        print("Usage: python functions_haiheng_20260502_final.py <input_folder> <output_folder>")
+        print("Usage: python pricingfiles_ETL_v3.py <input_folder> <output_folder>")
         sys.exit(1)
     r = run_pricing_etl(sys.argv[1], sys.argv[2])
     print(f"\nFiles found: {r['n_files']}  |  Loaded: {r['n_loaded']}  |  Rows: {r['n_rows']:,}")
