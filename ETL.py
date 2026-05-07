@@ -9,10 +9,10 @@ _root = Path(__file__).parent
 sys.path.insert(0, str(_root / "Functions"))
 sys.path.insert(0, str(_root / "Model"))
 
-from functions_haiheng_v3 import (
+from functions_haiheng_20260502_final.py import (
     load_pricing_file, _location_from_filename, _detect_format
 )
-from pricingfiles_ETL_v3 import run_pricing_etl
+from pricingfiles_ETL_haiheng_20260502_final.py import run_pricing_etl
 
 # ─────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
