@@ -5,15 +5,22 @@ import pandas as pd
 import streamlit as st
 from pathlib import Path
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Make sure our modules are importable regardless of working directory
+# ─────────────────────────────────────────────────────────────────────────────
 _root = Path(__file__).parent
 sys.path.insert(0, str(_root / "Functions"))
 sys.path.insert(0, str(_root / "Model"))
 
 from functions_haiheng_20260502_final import (
-    load_pricing_file, _location_from_filename, _detect_format
+    load_pricing_file,
+    _location_from_filename,
+    _detect_format,
 )
 from pricingfiles_ETL_haiheng_20260502_final import run_pricing_etl
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Page config
 # ─────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="CED Pricing Analysis Tool",
@@ -155,9 +162,9 @@ if st.button("🚀 Run Pricing Analysis", type="primary"):
             st.info("No data to display.")
         else:
             location_cols = [c for c in wide_df.columns
-                             if c not in {"catalog_num","upc","description",
-                                          "pricing_group","best_price",
-                                          "best_location","price_spread","is_tied"}]
+                             if c not in {"catalog_num", "upc", "description",
+                                          "pricing_group", "best_price",
+                                          "best_location", "price_spread", "is_tied"}]
 
             def highlight_best(row):
                 styles = [""] * len(row)
