@@ -1,147 +1,97 @@
+import os
+import pandas as pd
 from pathlib import Path
-import argparse
-import sys
 
-DEFAULT_FOLDER_PATH = r"C:/Users/haihe/Desktop/CED Capstone/PricingFiles"
-
-
-# Make project root importable when running from Model/
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-	sys.path.insert(0, str(PROJECT_ROOT))
-
-from functions_haiheng_20260308_v1 import (
-	load_pricing_files,
-	clean_pricing_data,
-	create_price_matrix,
-	combine_with_original_data,
-	load_and_pivot_data,
-)
+# Allow running standalone or via Streamlit (sys.path set by ETL.py)
+try:
+    from functions_haiheng_v2 import load_pricing_files, build_wide_matrix
+except ImportError:
+    import sys
+    sys.path.append(str(Path(__file__).parent.parent / "Functions"))
+    from functions_haiheng_v2 import load_pricing_files, build_wide_matrix
 
 
-def run_pricing_etl(
-	folder_path,
-	output_dir=None,
-	recursive=False,
-	include_parent_in_location=False,
-	save_wide=True,
-):
-	"""
-	Run pricing ETL and save outputs.
+def run_pricing_etl(folder_path: str, output_dir: str) -> dict:
+    """
+    Full ETL pipeline.
 
-	Args:
-		folder_path: Input folder with pricing files
-		output_dir: Folder to write outputs; defaults to <folder_path>/output
-		recursive: If True, search all subfolders for input files
-		include_parent_in_location: If True, include parent folder in location labels
-		save_wide: If True, generate wide-format comparison output
+    Parameters
+    ----------
+    folder_path : str  — directory containing raw pricing xlsx/csv files
+    output_dir  : str  — directory where output CSVs will be written
 
-	Returns:
-		Dict with output file paths
-	"""
-	input_folder = Path(folder_path)
-	out_dir = Path(output_dir) if output_dir else input_folder / "output"
-	out_dir.mkdir(parents=True, exist_ok=True)
+    Returns
+    -------
+    dict with keys:
+        'long'      → path to long_format.csv
+        'wide'      → path to wide_matrix.csv
+        'log'       → path to load_log.csv
+        'messages'  → list of per-file status strings
+        'n_files'   → int, number of files processed
+        'n_loaded'  → int, number of files successfully loaded
+        'n_rows'    → int, total rows in combined df
+    """
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
 
-	print("[1/5] Loading pricing files...")
-	df_raw = load_pricing_files(input_folder)
+    # 1. Load all files
+    combined_df, messages = load_pricing_files(folder_path)
 
-	print("[2/5] Cleaning pricing data...")
-	df_clean = clean_pricing_data(df_raw)
+    # 2. Build wide matrix (only if we have data)
+    wide_df = build_wide_matrix(combined_df) if not combined_df.empty else pd.DataFrame()
 
-	print("[3/5] Building price matrix...")
-	price_matrix = create_price_matrix(df_clean)
+    # 3. Build log df
+    log_records = []
+    for msg in messages:
+        if msg.startswith("✅"):
+            status = "success"
+        elif msg.startswith("⚠️"):
+            status = "skipped"
+        else:
+            status = "error"
+        log_records.append({"status": status, "message": msg})
+    log_df = pd.DataFrame(log_records)
 
-	print("[4/5] Merging matrix back to cleaned data...")
-	df_final = combine_with_original_data(df_clean, price_matrix)
+    # 4. Write outputs
+    long_path = str(out / "long_format.csv")
+    wide_path = str(out / "wide_matrix.csv")
+    log_path  = str(out / "load_log.csv")
 
-	raw_path = out_dir / "pricing_raw.csv"
-	clean_path = out_dir / "pricing_clean.csv"
-	matrix_path = out_dir / "price_matrix.csv"
-	final_path = out_dir / "pricing_final.csv"
+    combined_df.to_csv(long_path, index=False)
+    wide_df.to_csv(wide_path, index=False)
+    log_df.to_csv(log_path, index=False)
 
-	df_raw.to_csv(raw_path, index=False)
-	df_clean.to_csv(clean_path, index=False)
-	price_matrix.to_csv(matrix_path, index=False)
-	df_final.to_csv(final_path, index=False)
+    n_loaded = sum(1 for m in messages if m.startswith("✅"))
 
-	results = {
-		"raw": str(raw_path),
-		"clean": str(clean_path),
-		"matrix": str(matrix_path),
-		"final": str(final_path),
-	}
-
-	if save_wide:
-		print("[5/5] Creating wide-format comparison...")
-		wide_df = load_and_pivot_data(
-			input_folder,
-			recursive=recursive,
-			include_parent_in_location=include_parent_in_location,
-		)
-		wide_path = out_dir / "pricing_wide_comparison.xlsx"
-		wide_df.to_excel(wide_path)
-		results["wide"] = str(wide_path)
-	else:
-		print("[5/5] Skipping wide-format output.")
-
-	return results
+    return {
+        "long":     long_path,
+        "wide":     wide_path,
+        "log":      log_path,
+        "messages": messages,
+        "n_files":  len(messages),
+        "n_loaded": n_loaded,
+        "n_rows":   len(combined_df),
+    }
 
 
-def parse_args():
-	parser = argparse.ArgumentParser(description="Run pricing files ETL pipeline")
-	parser.add_argument(
-		"folder_path",
-		nargs="?",
-		default=None,
-		help="Path to the folder that contains pricing files (optional if DEFAULT_FOLDER_PATH is set)",
-	)
-	parser.add_argument(
-		"--output-dir",
-		default=None,
-		help="Optional output directory (default: <folder_path>/output)",
-	)
-	parser.add_argument(
-		"--recursive",
-		action="store_true",
-		help="Search for pricing files in subfolders recursively",
-	)
-	parser.add_argument(
-		"--include-parent-in-location",
-		action="store_true",
-		help="Prefix location with relative parent folder name",
-	)
-	parser.add_argument(
-		"--skip-wide",
-		action="store_true",
-		help="Skip generating wide-format comparison output",
-	)
-	return parser.parse_args()
-
-
-def main():
-	args = parse_args()
-	folder_to_use = args.folder_path or DEFAULT_FOLDER_PATH
-
-	if not folder_to_use:
-		raise ValueError("No folder path provided. Pass folder_path or set DEFAULT_FOLDER_PATH in this script.")
-
-	try:
-		output_files = run_pricing_etl(
-			folder_path=folder_to_use,
-			output_dir=args.output_dir,
-			recursive=args.recursive,
-			include_parent_in_location=args.include_parent_in_location,
-			save_wide=not args.skip_wide,
-		)
-
-		print("ETL completed successfully. Output files:")
-		for key, value in output_files.items():
-			print(f"- {key}: {value}")
-	except Exception as exc:
-		print(f"ETL failed: {exc}")
-		raise
-
-
+# ---------------------------------------------------------------------------
+# CLI usage
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
-	main()
+    import sys
+    if len(sys.argv) < 3:
+        print("Usage: python pricingfiles_ETL_v2.py <input_folder> <output_folder>")
+        sys.exit(1)
+
+    results = run_pricing_etl(sys.argv[1], sys.argv[2])
+    print(f"\n{'='*60}")
+    print(f"Files found:    {results['n_files']}")
+    print(f"Files loaded:   {results['n_loaded']}")
+    print(f"Total rows:     {results['n_rows']:,}")
+    print(f"\nOutputs:")
+    print(f"  Long format → {results['long']}")
+    print(f"  Wide matrix → {results['wide']}")
+    print(f"  Load log    → {results['log']}")
+    print(f"\nPer-file log:")
+    for msg in results["messages"]:
+        print(f"  {msg}")
